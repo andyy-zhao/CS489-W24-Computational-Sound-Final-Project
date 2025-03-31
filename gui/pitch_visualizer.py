@@ -102,12 +102,20 @@ class PitchVisualizer:
         self.slider_bg_color = (*DARK_GRAY, 30)
         self.slider_active_color = BLUE
         
+        # Chorus button properties
+        self.chorus_button_width = 150  # Same as harmonizer
+        self.chorus_button_height = 35  # Same as harmonizer
+        self.chorus_button_x = self.slider_x - self.chorus_button_width - 20  # Position to left of slider
+        self.chorus_button_y = WINDOW_HEIGHT - 80  # Same height as harmonizer
+        self.chorus_button_color = (65, 105, 225)  # Royal blue
+        self.chorus_button_hover_color = (100, 149, 237)  # Cornflower blue
+        
         # Harmonizer button properties
-        self.harmonizer_button_width = 150  # Reduced from 180
-        self.harmonizer_button_height = 35  # Reduced from 45
-        self.harmonizer_button_x = self.slider_x + self.slider_width + 20  # Position to right of slider with 20px gap
-        self.harmonizer_button_y = WINDOW_HEIGHT - 80  # Align vertically with slider
-        self.harmonizer_button_color = (147, 51, 234)  # Different shade of purple
+        self.harmonizer_button_width = 150
+        self.harmonizer_button_height = 35
+        self.harmonizer_button_x = self.slider_x + self.slider_width + 20  # Position to right of slider
+        self.harmonizer_button_y = WINDOW_HEIGHT - 80
+        self.harmonizer_button_color = (147, 51, 234)
         self.harmonizer_button_hover_color = (167, 71, 254)
         
         # Fonts
@@ -121,6 +129,12 @@ class PitchVisualizer:
         # Initialize variables
         self.is_recording = False
         self.is_recording_wav = False
+        self.is_playing_shifted = False
+        self.is_playing_chorus = False    # Add chorus playback state
+        self.is_playing_harmonizer = False  # Add harmonizer playback state
+        self.current_play_obj = None
+        self.chorus_play_obj = None       # Add chorus playback object
+        self.harmonizer_play_obj = None   # Add harmonizer playback object
         self.stream = None
         self.update_thread = None
         self.current_note = "--"
@@ -448,19 +462,34 @@ class PitchVisualizer:
             return
             
         try:
-            # Generate shifted audio
-            self.pitch_shifter.shift_pitch("recording.wav", "shifted.wav", self.slider_value)
-            
-            # Play the shifted audio using system default audio player
-            if sys.platform == "darwin":  # macOS
-                subprocess.run(["afplay", "shifted.wav"])
-            elif sys.platform == "linux":
-                subprocess.run(["aplay", "shifted.wav"])
-            else:  # Windows
-                os.startfile("shifted.wav")
+            if self.is_playing_shifted:
+                # Stop playback if already playing
+                if self.current_play_obj:
+                    self.current_play_obj.stop()
+                self.current_play_obj = None
+                self.is_playing_shifted = False
+            else:
+                # Generate shifted audio
+                self.pitch_shifter.shift_pitch("recording.wav", "shifted.wav", self.slider_value)
+                
+                # Play the shifted audio
+                wave_obj = sa.WaveObject.from_wave_file("shifted.wav")
+                self.current_play_obj = wave_obj.play()
+                self.is_playing_shifted = True
+                
+                # Start a thread to monitor playback completion
+                def monitor_playback():
+                    if self.current_play_obj:
+                        self.current_play_obj.wait_done()
+                        self.is_playing_shifted = False
+                        self.current_play_obj = None
+                
+                threading.Thread(target=monitor_playback, daemon=True).start()
                 
         except Exception as e:
             print(f"Error shifting/playing audio: {e}")
+            self.is_playing_shifted = False
+            self.current_play_obj = None
 
     def create_harmonizer_effect(self):
         if not os.path.exists("recording.wav"):
@@ -468,11 +497,19 @@ class PitchVisualizer:
             return
             
         try:
+            if self.is_playing_harmonizer:
+                # Stop playback if already playing
+                if self.harmonizer_play_obj:
+                    self.harmonizer_play_obj.stop()
+                self.harmonizer_play_obj = None
+                self.is_playing_harmonizer = False
+                return
+
             # Create pitch shifted versions
-            self.pitch_shifter.shift_pitch("recording.wav", "lower_harmony.wav", -3)  # Major third below
-            self.pitch_shifter.shift_pitch("recording.wav", "upper_harmony.wav", 4)   # Major third above
-            self.pitch_shifter.shift_pitch("recording.wav", "fifth_harmony.wav", 7)   # Perfect fifth above
-            self.pitch_shifter.shift_pitch("recording.wav", "octave.wav", 12) 
+            self.pitch_shifter.shift_pitch("recording.wav", "lower_harmony.wav", -3)
+            self.pitch_shifter.shift_pitch("recording.wav", "upper_harmony.wav", 4)
+            self.pitch_shifter.shift_pitch("recording.wav", "fifth_harmony.wav", 7)
+            self.pitch_shifter.shift_pitch("recording.wav", "octave.wav", 12)
 
             try:
                 # Load all audio files with explicit sample rate
@@ -502,16 +539,27 @@ class PitchVisualizer:
                 
                 # Play the combined audio
                 wave_obj = sa.WaveObject.from_wave_file("harmonized.wav")
-                play_obj = wave_obj.play()
-                play_obj.wait_done()
+                self.harmonizer_play_obj = wave_obj.play()
+                self.is_playing_harmonizer = True
+                
+                # Start a thread to monitor playback completion
+                def monitor_playback():
+                    if self.harmonizer_play_obj:
+                        self.harmonizer_play_obj.wait_done()
+                        self.is_playing_harmonizer = False
+                        self.harmonizer_play_obj = None
+                
+                threading.Thread(target=monitor_playback, daemon=True).start()
                 
             except Exception as e:
                 print(f"Error mixing audio: {e}")
                 import traceback
                 traceback.print_exc()
+                self.is_playing_harmonizer = False
+                self.harmonizer_play_obj = None
             finally:
                 # Clean up temporary files
-                temp_files = ["lower_harmony.wav", "upper_harmony.wav", "fifth_harmony.wav"]
+                temp_files = ["lower_harmony.wav", "upper_harmony.wav", "fifth_harmony.wav", "octave.wav"]
                 for file in temp_files:
                     if os.path.exists(file):
                         try:
@@ -521,6 +569,100 @@ class PitchVisualizer:
                 
         except Exception as e:
             print(f"Error creating harmonizer effect: {e}")
+            self.is_playing_harmonizer = False
+            self.harmonizer_play_obj = None
+
+    def create_chorus_effect(self):
+        if not os.path.exists("recording.wav"):
+            print("No recording found. Please record audio first.")
+            return
+            
+        try:
+            if self.is_playing_chorus:
+                # Stop playback if already playing
+                if self.chorus_play_obj:
+                    self.chorus_play_obj.stop()
+                self.chorus_play_obj = None
+                self.is_playing_chorus = False
+                return
+
+            # Create detuned copies
+            self.pitch_shifter.shift_pitch("recording.wav", "chorus1.wav", 0.15)
+            self.pitch_shifter.shift_pitch("recording.wav", "chorus2.wav", -0.15)
+            self.pitch_shifter.shift_pitch("recording.wav", "chorus3.wav", 0.08)
+            self.pitch_shifter.shift_pitch("recording.wav", "chorus4.wav", -0.08)
+            self.pitch_shifter.shift_pitch("recording.wav", "chorus5.wav", 0.2)
+            
+            try:
+                # Load all audio files with explicit sample rate
+                original = AudioSegment.from_wav("recording.wav").set_frame_rate(RECORD_RATE)
+                chorus1 = AudioSegment.from_wav("chorus1.wav").set_frame_rate(RECORD_RATE)
+                chorus2 = AudioSegment.from_wav("chorus2.wav").set_frame_rate(RECORD_RATE)
+                chorus3 = AudioSegment.from_wav("chorus3.wav").set_frame_rate(RECORD_RATE)
+                
+                # Add delays to create chorus effect
+                delay1 = 20  # 20ms delay
+                delay2 = 30  # 30ms delay
+                delay3 = 15  # 15ms delay
+                
+                # Create silence for delays
+                silence1 = AudioSegment.silent(duration=delay1)
+                silence2 = AudioSegment.silent(duration=delay2)
+                silence3 = AudioSegment.silent(duration=delay3)
+                
+                # Add delays to chorus tracks
+                chorus1 = silence1 + chorus1
+                chorus2 = silence2 + chorus2
+                chorus3 = silence3 + chorus3
+                
+                # Adjust volumes
+                original = original - 3 
+                chorus1 = chorus1 - 4
+                chorus2 = chorus2 - 4
+                chorus3 = chorus3 - 6
+                
+                # Combine all tracks
+                combined_audio = original.overlay(chorus1)
+                combined_audio = combined_audio.overlay(chorus2)
+                combined_audio = combined_audio.overlay(chorus3)
+                
+                # Export combined audio
+                combined_audio.export("chorus.wav", format="wav", parameters=["-ar", str(RECORD_RATE)])
+                
+                # Play the combined audio
+                wave_obj = sa.WaveObject.from_wave_file("chorus.wav")
+                self.chorus_play_obj = wave_obj.play()
+                self.is_playing_chorus = True
+                
+                # Start a thread to monitor playback completion
+                def monitor_playback():
+                    if self.chorus_play_obj:
+                        self.chorus_play_obj.wait_done()
+                        self.is_playing_chorus = False
+                        self.chorus_play_obj = None
+                
+                threading.Thread(target=monitor_playback, daemon=True).start()
+                
+            except Exception as e:
+                print(f"Error creating chorus effect: {e}")
+                import traceback
+                traceback.print_exc()
+                self.is_playing_chorus = False
+                self.chorus_play_obj = None
+            finally:
+                # Clean up temporary files
+                temp_files = ["chorus1.wav", "chorus2.wav", "chorus3.wav", "chorus4.wav", "chorus5.wav"]
+                for file in temp_files:
+                    if os.path.exists(file):
+                        try:
+                            os.remove(file)
+                        except:
+                            pass
+                
+        except Exception as e:
+            print(f"Error creating chorus effect: {e}")
+            self.is_playing_chorus = False
+            self.chorus_play_obj = None
 
     def run(self):
         running = True
@@ -547,6 +689,12 @@ class PitchVisualizer:
                                                   self.shift_button_width, self.shift_button_height)
                     if shift_button_rect.collidepoint(event.pos):
                         threading.Thread(target=self.shift_and_play_audio).start()
+                    
+                    # Check chorus button
+                    chorus_button_rect = pygame.Rect(self.chorus_button_x, self.chorus_button_y,
+                                                   self.chorus_button_width, self.chorus_button_height)
+                    if chorus_button_rect.collidepoint(event.pos):
+                        threading.Thread(target=self.create_chorus_effect).start()
                     
                     # Check harmonizer button
                     harmonizer_button_rect = pygame.Rect(self.harmonizer_button_x, self.harmonizer_button_y,
@@ -595,13 +743,22 @@ class PitchVisualizer:
             self.draw_button(wav_button_text, self.wav_button_x, self.wav_button_y, self.wav_button_width, self.wav_button_height,
                            self.wav_button_color, self.wav_button_hover_color)
             
-            # Draw shift button
-            self.draw_button("Play Shifted Audio", self.shift_button_x, self.shift_button_y,
+            # Draw shift button with updated text
+            shift_button_text = "Stop Playing" if self.is_playing_shifted else "Play Shifted Audio"
+            self.draw_button(shift_button_text, self.shift_button_x, self.shift_button_y,
                            self.shift_button_width, self.shift_button_height,
                            self.shift_button_color, self.shift_button_hover_color)
             
+            # Draw chorus button with smaller font
+            chorus_button_text = "Stop Chorus" if self.is_playing_chorus else "Chorus Effect"
+            self.draw_button(chorus_button_text, self.chorus_button_x, self.chorus_button_y,
+                           self.chorus_button_width, self.chorus_button_height,
+                           self.chorus_button_color, self.chorus_button_hover_color,
+                           custom_font=self.harmonizer_font)
+            
             # Draw harmonizer button with smaller font
-            self.draw_button("Harmonizer Effect", self.harmonizer_button_x, self.harmonizer_button_y,
+            harmonizer_button_text = "Stop Harmonizer" if self.is_playing_harmonizer else "Harmonizer Effect"
+            self.draw_button(harmonizer_button_text, self.harmonizer_button_x, self.harmonizer_button_y,
                            self.harmonizer_button_width, self.harmonizer_button_height,
                            self.harmonizer_button_color, self.harmonizer_button_hover_color,
                            custom_font=self.harmonizer_font)
