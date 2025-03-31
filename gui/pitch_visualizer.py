@@ -479,6 +479,13 @@ class PitchVisualizer:
                 audio = audio.set_frame_rate(RECORD_RATE)  # Resample to 44.1kHz
                 audio.export("shifted.wav", format="wav")
                 
+                # Clean up temporary file
+                if os.path.exists("shifted_temp.wav"):
+                    try:
+                        os.remove("shifted_temp.wav")
+                    except:
+                        pass
+                
                 # Play the resampled audio
                 wave_obj = sa.WaveObject.from_wave_file("shifted.wav")
                 self.current_play_obj = wave_obj.play()
@@ -494,13 +501,12 @@ class PitchVisualizer:
                     finally:
                         self.is_playing_shifted = False
                         self.current_play_obj = None
-                        # Clean up the temporary files
-                        for file in ["shifted.wav", "shifted_temp.wav"]:
-                            if os.path.exists(file):
-                                try:
-                                    os.remove(file)
-                                except:
-                                    pass
+                        # Only clean up the temp file, keep shifted.wav
+                        if os.path.exists("shifted_temp.wav"):
+                            try:
+                                os.remove("shifted_temp.wav")
+                            except:
+                                pass
                 
                 threading.Thread(target=monitor_playback, daemon=True).start()
                 
@@ -510,13 +516,12 @@ class PitchVisualizer:
                 traceback.print_exc()
                 self.is_playing_shifted = False
                 self.current_play_obj = None
-                # Clean up the temporary files
-                for file in ["shifted.wav", "shifted_temp.wav"]:
-                    if os.path.exists(file):
-                        try:
-                            os.remove(file)
-                        except:
-                            pass
+                # Clean up only the temp file if there's an error
+                if os.path.exists("shifted_temp.wav"):
+                    try:
+                        os.remove("shifted_temp.wav")
+                    except:
+                        pass
                 
         except Exception as e:
             print(f"Error in shift_and_play_audio: {e}")
@@ -538,15 +543,35 @@ class PitchVisualizer:
                 self.is_playing_harmonizer = False
                 return
 
-            self.pitch_shifter.shift_pitch("recording.wav", "lower_harmony.wav", -3.02)
-            self.pitch_shifter.shift_pitch("recording.wav", "upper_harmony.wav", 3.98)
-            self.pitch_shifter.shift_pitch("recording.wav", "fifth_harmony.wav", 7.02)
-            self.pitch_shifter.shift_pitch("recording.wav", "octave.wav", 11.98)
-            self.pitch_shifter.shift_pitch("recording.wav", "lower_detune.wav", -3.08)
-            self.pitch_shifter.shift_pitch("recording.wav", "upper_detune.wav", 4.04)
+            # First generate shifted.wav based on current semitones
+            self.pitch_shifter.shift_pitch("recording.wav", "shifted_temp.wav", self.slider_value)
+            try:
+                # Load and resample the shifted audio to standard sample rate
+                audio = AudioSegment.from_wav("shifted_temp.wav")
+                audio = audio.set_frame_rate(RECORD_RATE)  # Resample to 44.1kHz
+                audio.export("shifted.wav", format="wav")
+                
+                # Clean up temporary file
+                if os.path.exists("shifted_temp.wav"):
+                    try:
+                        os.remove("shifted_temp.wav")
+                    except:
+                        pass
+            except Exception as e:
+                print(f"Error generating shifted audio: {e}")
+                return
+
+            # Now create harmonies from the shifted audio
+            self.pitch_shifter.shift_pitch("shifted.wav", "lower_harmony.wav", -3.02)
+            self.pitch_shifter.shift_pitch("shifted.wav", "upper_harmony.wav", 3.98)
+            self.pitch_shifter.shift_pitch("shifted.wav", "fifth_harmony.wav", 7.02)
+            self.pitch_shifter.shift_pitch("shifted.wav", "octave.wav", 11.98)
+            self.pitch_shifter.shift_pitch("shifted.wav", "lower_detune.wav", -3.08)
+            self.pitch_shifter.shift_pitch("shifted.wav", "upper_detune.wav", 4.04)
 
             try:
-                original = AudioSegment.from_wav("recording.wav").set_frame_rate(RECORD_RATE)
+                # Load the shifted audio as the original
+                original = AudioSegment.from_wav("shifted.wav").set_frame_rate(RECORD_RATE)
                 lower = AudioSegment.from_wav("lower_harmony.wav").set_frame_rate(RECORD_RATE)
                 upper = AudioSegment.from_wav("upper_harmony.wav").set_frame_rate(RECORD_RATE)
                 fifth = AudioSegment.from_wav("fifth_harmony.wav").set_frame_rate(RECORD_RATE)
@@ -652,16 +677,34 @@ class PitchVisualizer:
                 self.is_playing_chorus = False
                 return
 
-            # Create detuned copies
-            self.pitch_shifter.shift_pitch("recording.wav", "chorus1.wav", 0.15)
-            self.pitch_shifter.shift_pitch("recording.wav", "chorus2.wav", -0.15)
-            self.pitch_shifter.shift_pitch("recording.wav", "chorus3.wav", 0.08)
-            self.pitch_shifter.shift_pitch("recording.wav", "chorus4.wav", -0.08)
-            self.pitch_shifter.shift_pitch("recording.wav", "chorus5.wav", 0.2)
+            # First generate shifted.wav based on current semitones
+            self.pitch_shifter.shift_pitch("recording.wav", "shifted_temp.wav", self.slider_value)
+            try:
+                # Load and resample the shifted audio to standard sample rate
+                audio = AudioSegment.from_wav("shifted_temp.wav")
+                audio = audio.set_frame_rate(RECORD_RATE)  # Resample to 44.1kHz
+                audio.export("shifted.wav", format="wav")
+                
+                # Clean up temporary file
+                if os.path.exists("shifted_temp.wav"):
+                    try:
+                        os.remove("shifted_temp.wav")
+                    except:
+                        pass
+            except Exception as e:
+                print(f"Error generating shifted audio: {e}")
+                return
+
+            # Now create detuned copies from the shifted audio
+            self.pitch_shifter.shift_pitch("shifted.wav", "chorus1.wav", 0.15)
+            self.pitch_shifter.shift_pitch("shifted.wav", "chorus2.wav", -0.15)
+            self.pitch_shifter.shift_pitch("shifted.wav", "chorus3.wav", 0.08)
+            self.pitch_shifter.shift_pitch("shifted.wav", "chorus4.wav", -0.08)
+            self.pitch_shifter.shift_pitch("shifted.wav", "chorus5.wav", 0.2)
             
             try:
-                # Load all audio files with explicit sample rate
-                original = AudioSegment.from_wav("recording.wav").set_frame_rate(RECORD_RATE)
+                # Load the shifted audio as the original
+                original = AudioSegment.from_wav("shifted.wav").set_frame_rate(RECORD_RATE)
                 chorus1 = AudioSegment.from_wav("chorus1.wav").set_frame_rate(RECORD_RATE)
                 chorus2 = AudioSegment.from_wav("chorus2.wav").set_frame_rate(RECORD_RATE)
                 chorus3 = AudioSegment.from_wav("chorus3.wav").set_frame_rate(RECORD_RATE)
@@ -810,7 +853,7 @@ class PitchVisualizer:
                            self.wav_button_color, self.wav_button_hover_color)
             
             # Draw shift button with updated text
-            shift_button_text = "Stop Playing" if self.is_playing_shifted else "Play Shifted Audio"
+            shift_button_text = "Stop Playing" if self.is_playing_shifted else "Play Audio"
             self.draw_button(shift_button_text, self.shift_button_x, self.shift_button_y,
                            self.shift_button_width, self.shift_button_height,
                            self.shift_button_color, self.shift_button_hover_color)
