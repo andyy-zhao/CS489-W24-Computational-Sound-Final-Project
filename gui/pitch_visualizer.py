@@ -3,22 +3,25 @@ import sys
 import threading
 import numpy as np
 from models.real_time_pitch_detector import detect_pitch, create_audio_stream, fs, CHUNK
+from models.pitch_shifter import PitchShifter
 import pyaudio
 import wave
 from datetime import datetime
+import os
+import subprocess
 
 # Initialize Pygame
 pygame.init()
 
 # Constants
 WINDOW_WIDTH = 800
-WINDOW_HEIGHT = 600
+WINDOW_HEIGHT = 650  # Slightly reduced height
 FPS = 60
 CHART_HEIGHT = 200
 CHART_WIDTH = 700
 CHART_X = (WINDOW_WIDTH - CHART_WIDTH) // 2
-CHART_Y = 280  # Move chart back up since buttons will be at bottom
-NUM_BARS = 500  # Increased for smoother visualization
+CHART_Y = 220  # Keep chart position
+NUM_BARS = 500
 
 # Audio Recording Settings
 RECORD_FORMAT = pyaudio.paInt16
@@ -59,12 +62,50 @@ class PitchVisualizer:
         self.background_gradient = create_gradient(BACKGROUND_TOP, BACKGROUND_BOTTOM, WINDOW_HEIGHT)
         self.bar_gradient = create_gradient(BLUE, PURPLE, CHART_HEIGHT)
         
+        # Initialize pitch shifter
+        self.pitch_shifter = PitchShifter()
+        
+        # Button properties with updated dimensions
+        self.button_width = 180  # Smaller width
+        self.button_height = 45  # Smaller height
+        self.button_x = WINDOW_WIDTH // 2 - 290  # Leftmost button
+        self.button_y = WINDOW_HEIGHT - 180  # Move buttons up
+        self.button_color = BLUE
+        self.button_hover_color = LIGHT_BLUE
+        
+        # WAV recording button properties
+        self.wav_button_width = 180
+        self.wav_button_height = 45
+        self.wav_button_x = WINDOW_WIDTH // 2 - 90  # Center button
+        self.wav_button_y = WINDOW_HEIGHT - 180  # Same height as other buttons
+        self.wav_button_color = GREEN
+        self.wav_button_hover_color = (45, 212, 108)
+        
+        # Shift button properties
+        self.shift_button_width = 180
+        self.shift_button_height = 45
+        self.shift_button_x = WINDOW_WIDTH // 2 + 110  # Rightmost button
+        self.shift_button_y = WINDOW_HEIGHT - 180  # Same height as other buttons
+        self.shift_button_color = PURPLE
+        self.shift_button_hover_color = (167, 71, 254)
+        
+        # Slider properties
+        self.slider_width = 500  # Make slider even wider
+        self.slider_height = 6
+        self.slider_x = WINDOW_WIDTH // 2 - self.slider_width // 2
+        self.slider_y = WINDOW_HEIGHT - 70
+        self.slider_knob_radius = 10
+        self.slider_value = 0
+        self.is_dragging = False
+        self.slider_bg_color = (*DARK_GRAY, 30)
+        self.slider_active_color = BLUE
+        
         # Fonts
         self.title_font = pygame.font.Font(None, 48)
         self.note_font = pygame.font.Font(None, 86)  # Increased size for note display
         self.freq_font = pygame.font.Font(None, 36)
         self.label_font = pygame.font.Font(None, 24)
-        self.button_font = pygame.font.Font(None, 32)  # Smaller font for buttons
+        self.button_font = pygame.font.Font(None, 28)  # Reduced from 32 to 28 for smaller button text
         
         # Initialize variables
         self.is_recording = False
@@ -81,22 +122,6 @@ class PitchVisualizer:
         self.spectrum_data = None
         self.max_freq = 4200
         self.detected_freq = None
-        
-        # Button properties with updated dimensions
-        self.button_width = 180  # Smaller width
-        self.button_height = 45  # Smaller height
-        self.button_x = WINDOW_WIDTH // 2 - 200  # Left of center
-        self.button_y = WINDOW_HEIGHT - 70  # Near bottom of window
-        self.button_color = BLUE
-        self.button_hover_color = LIGHT_BLUE
-        
-        # WAV recording button properties
-        self.wav_button_width = 180  # Smaller width
-        self.wav_button_height = 45  # Smaller height
-        self.wav_button_x = WINDOW_WIDTH // 2 + 20  # Right of center
-        self.wav_button_y = WINDOW_HEIGHT - 70  # Same height as other button
-        self.wav_button_color = GREEN
-        self.wav_button_hover_color = (45, 212, 108)  # Lighter green
         
         # Frequency label step
         self.freq_label_step = 600
@@ -142,6 +167,11 @@ class PitchVisualizer:
         chart_surface = pygame.Surface((CHART_WIDTH, CHART_HEIGHT))
         chart_surface.fill(WHITE)
         
+        # Add a subtle shadow behind the chart
+        shadow_surface = pygame.Surface((CHART_WIDTH + 4, CHART_HEIGHT + 4), pygame.SRCALPHA)
+        pygame.draw.rect(shadow_surface, (*BLACK, 30), shadow_surface.get_rect(), border_radius=15)
+        self.screen.blit(shadow_surface, (CHART_X - 2, CHART_Y - 2))
+        
         # Draw grid lines with updated color
         num_vertical_lines = 8
         for i in range(num_vertical_lines):
@@ -177,16 +207,17 @@ class PitchVisualizer:
                         # Draw glow effect
                         glow_surface = pygame.Surface((int(bar_width), bar_height), pygame.SRCALPHA)
                         for y in range(bar_height):
-                            alpha = int(150 * (y/bar_height))  # Gradient alpha
-                            color = self.bar_gradient[min(y, CHART_HEIGHT-1)]
+                            alpha = int(150 * (1 - y/bar_height))  # Invert gradient alpha
+                            color = self.bar_gradient[min(bar_height - y - 1, CHART_HEIGHT-1)]  # Invert color gradient
                             glow_color = (*color, alpha)
                             pygame.draw.line(
                                 glow_surface,
                                 glow_color,
-                                (0, bar_height - y),
-                                (bar_width - bar_spacing, bar_height - y)
+                                (0, y),  # Start from bottom
+                                (bar_width - bar_spacing, y)  # Draw upward
                             )
-                        chart_surface.blit(glow_surface, (i * bar_width, 0))
+                        # Position the bar at the bottom of the chart
+                        chart_surface.blit(glow_surface, (i * bar_width, CHART_HEIGHT - bar_height))
             
             # Draw detected frequency line with glow effect
             if self.detected_freq and self.detected_freq <= self.max_freq:
@@ -314,6 +345,109 @@ class PitchVisualizer:
         print(f"Audio saved to {output_file}")
         self.is_recording_wav = False
 
+    def draw_slider(self):
+        # Draw slider track background with gradient
+        track_height = self.slider_height
+        track_rect = pygame.Rect(self.slider_x, self.slider_y - track_height//2, 
+                               self.slider_width, track_height)
+        
+        # Draw main track
+        pygame.draw.rect(self.screen, self.slider_bg_color, track_rect, border_radius=4)
+        
+        # Draw filled portion of slider
+        value_range = 24  # -12 to 12 semitones
+        center_x = self.slider_x + self.slider_width // 2
+        knob_x = self.slider_x + int((self.slider_value + 12) * self.slider_width / value_range)
+        
+        # Draw active portion with gradient
+        if knob_x != center_x:
+            active_rect = pygame.Rect(min(center_x, knob_x), self.slider_y - track_height//2,
+                                    abs(knob_x - center_x), track_height)
+            active_color = (*self.slider_active_color, 150)
+            pygame.draw.rect(self.screen, active_color, active_rect, border_radius=4)
+        
+        # Draw center marker
+        center_marker_height = 12
+        pygame.draw.rect(self.screen, (*DARK_GRAY, 100),
+                        (center_x - 1, self.slider_y - center_marker_height//2,
+                         2, center_marker_height))
+        
+        # Draw knob with shadow and gradient
+        knob_y = self.slider_y
+        
+        # Draw shadow
+        shadow_radius = self.slider_knob_radius + 2
+        pygame.draw.circle(self.screen, (*BLACK, 30), (knob_x + 1, knob_y + 1), shadow_radius)
+        
+        # Draw main knob with gradient
+        knob_color = LIGHT_BLUE if self.is_dragging else BLUE
+        pygame.draw.circle(self.screen, knob_color, (knob_x, knob_y), self.slider_knob_radius)
+        
+        # Add highlight to knob
+        highlight_radius = self.slider_knob_radius - 2
+        pygame.draw.circle(self.screen, (*WHITE, 50), 
+                         (knob_x - 1, knob_y - 1), 
+                         highlight_radius)
+        
+        # Draw value label with background
+        label_y = self.slider_y - 25
+        value_text = f"{self.slider_value:+d} semitones"
+        
+        # Draw background for text
+        text_surface = self.button_font.render(value_text, True, DARK_GRAY)
+        text_rect = text_surface.get_rect(center=(WINDOW_WIDTH // 2, label_y))
+        padding = 10
+        bg_rect = pygame.Rect(text_rect.x - padding, text_rect.y - padding//2,
+                            text_rect.width + padding * 2, text_rect.height + padding)
+        pygame.draw.rect(self.screen, (*WHITE, 150), bg_rect, border_radius=6)
+        
+        # Draw text
+        self.draw_text(value_text, self.button_font, DARK_GRAY,
+                      WINDOW_WIDTH // 2, label_y)
+
+    def handle_slider_interaction(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            # Check if click is on slider knob
+            value_range = 24  # -12 to 12 semitones
+            knob_x = self.slider_x + int((self.slider_value + 12) * self.slider_width / value_range)
+            knob_y = self.slider_y + self.slider_height // 2
+            knob_rect = pygame.Rect(knob_x - self.slider_knob_radius, 
+                                  knob_y - self.slider_knob_radius,
+                                  self.slider_knob_radius * 2,
+                                  self.slider_knob_radius * 2)
+            if knob_rect.collidepoint(event.pos):
+                self.is_dragging = True
+        
+        elif event.type == pygame.MOUSEBUTTONUP:
+            self.is_dragging = False
+        
+        elif event.type == pygame.MOUSEMOTION and self.is_dragging:
+            # Update slider value based on mouse position
+            x = max(self.slider_x, min(event.pos[0], self.slider_x + self.slider_width))
+            value_range = 24  # -12 to 12 semitones
+            self.slider_value = round((x - self.slider_x) * value_range / self.slider_width - 12)
+            self.slider_value = max(-12, min(12, self.slider_value))
+
+    def shift_and_play_audio(self):
+        if not os.path.exists("recording.wav"):
+            print("No recording found. Please record audio first.")
+            return
+            
+        try:
+            # Generate shifted audio
+            self.pitch_shifter.shift_pitch("recording.wav", "shifted.wav", self.slider_value)
+            
+            # Play the shifted audio using system default audio player
+            if sys.platform == "darwin":  # macOS
+                subprocess.run(["afplay", "shifted.wav"])
+            elif sys.platform == "linux":
+                subprocess.run(["aplay", "shifted.wav"])
+            else:  # Windows
+                os.startfile("shifted.wav")
+                
+        except Exception as e:
+            print(f"Error shifting/playing audio: {e}")
+
     def run(self):
         running = True
         while running:
@@ -333,6 +467,15 @@ class PitchVisualizer:
                             self.is_recording_wav = False
                         else:
                             threading.Thread(target=self.record_to_wav).start()
+                    
+                    # Check shift button
+                    shift_button_rect = pygame.Rect(self.shift_button_x, self.shift_button_y, 
+                                                  self.shift_button_width, self.shift_button_height)
+                    if shift_button_rect.collidepoint(event.pos):
+                        threading.Thread(target=self.shift_and_play_audio).start()
+                
+                # Handle slider interactions
+                self.handle_slider_interaction(event)
             
             # Draw background gradient
             self.draw_background()
@@ -353,14 +496,17 @@ class PitchVisualizer:
             
             # Draw frequency with subtle shadow
             self.draw_text(f"Frequency: {self.current_freq} Hz", self.freq_font, (*DARK_GRAY, 100), 
-                         WINDOW_WIDTH // 2 + 1, 221)
+                         WINDOW_WIDTH // 2 + 1, 191)  # Adjusted position
             self.draw_text(f"Frequency: {self.current_freq} Hz", self.freq_font, DARK_GRAY, 
-                         WINDOW_WIDTH // 2, 220)
+                         WINDOW_WIDTH // 2, 190)  # Adjusted position
             
             # Draw chart
             self.draw_chart()
             
-            # Draw buttons
+            # Draw slider
+            self.draw_slider()
+            
+            # Draw all buttons
             pitch_button_text = "Stop Recording" if self.is_recording else "Start Recording"
             self.draw_button(pitch_button_text, self.button_x, self.button_y, self.button_width, self.button_height,
                            self.button_color, self.button_hover_color)
@@ -368,6 +514,11 @@ class PitchVisualizer:
             wav_button_text = "Recording..." if self.is_recording_wav else "Record to WAV"
             self.draw_button(wav_button_text, self.wav_button_x, self.wav_button_y, self.wav_button_width, self.wav_button_height,
                            self.wav_button_color, self.wav_button_hover_color)
+            
+            # Draw shift button
+            self.draw_button("Play Shifted Audio", self.shift_button_x, self.shift_button_y,
+                           self.shift_button_width, self.shift_button_height,
+                           self.shift_button_color, self.shift_button_hover_color)
             
             # Update display
             pygame.display.flip()
