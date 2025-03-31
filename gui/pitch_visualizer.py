@@ -3,6 +3,9 @@ import sys
 import threading
 import numpy as np
 from models.real_time_pitch_detector import detect_pitch, create_audio_stream, fs, CHUNK
+import pyaudio
+import wave
+from datetime import datetime
 
 # Initialize Pygame
 pygame.init()
@@ -16,6 +19,13 @@ CHART_WIDTH = 700
 CHART_X = (WINDOW_WIDTH - CHART_WIDTH) // 2
 CHART_Y = 280
 NUM_BARS = 500  # Increased for smoother visualization
+
+# Audio Recording Settings
+RECORD_FORMAT = pyaudio.paInt16
+RECORD_CHANNELS = 1
+RECORD_RATE = 44100
+RECORD_CHUNK = 1024
+RECORD_DURATION = 10  # Recording duration in seconds (doubled from 5 to 10)
 
 # Colors
 WHITE = (255, 255, 255)
@@ -54,6 +64,7 @@ class PitchVisualizer:
         
         # Initialize variables
         self.is_recording = False
+        self.is_recording_wav = False
         self.stream = None
         self.update_thread = None
         self.current_note = "--"
@@ -75,6 +86,14 @@ class PitchVisualizer:
         self.button_color = BLUE
         self.button_hover_color = LIGHT_BLUE
         
+        # WAV recording button properties
+        self.wav_button_width = 200
+        self.wav_button_height = 50
+        self.wav_button_x = WINDOW_WIDTH // 2 - self.wav_button_width // 2
+        self.wav_button_y = WINDOW_HEIGHT - 140
+        self.wav_button_color = GREEN
+        self.wav_button_hover_color = (46, 204, 113)
+        
         # Frequency label step
         self.freq_label_step = 600  # Adjusted for new range
         
@@ -83,16 +102,16 @@ class PitchVisualizer:
         text_rect = text_surface.get_rect(center=(x, y))
         self.screen.blit(text_surface, text_rect)
         
-    def draw_button(self, text):
+    def draw_button(self, text, x, y, width, height, color, hover_color):
         mouse_pos = pygame.mouse.get_pos()
-        button_rect = pygame.Rect(self.button_x, self.button_y, self.button_width, self.button_height)
+        button_rect = pygame.Rect(x, y, width, height)
         
         # Draw button with rounded corners
-        color = self.button_hover_color if button_rect.collidepoint(mouse_pos) else self.button_color
-        pygame.draw.rect(self.screen, color, button_rect, border_radius=10)
+        current_color = hover_color if button_rect.collidepoint(mouse_pos) else color
+        pygame.draw.rect(self.screen, current_color, button_rect, border_radius=10)
         
         # Draw text
-        self.draw_text(text, self.freq_font, WHITE, WINDOW_WIDTH // 2, self.button_y + self.button_height // 2)
+        self.draw_text(text, self.freq_font, WHITE, x + width // 2, y + height // 2)
         
         return button_rect
     
@@ -219,6 +238,48 @@ class PitchVisualizer:
                     print(f"Error in update_display: {e}")
                     break
     
+    def record_to_wav(self):
+        if self.is_recording_wav:
+            return
+            
+        self.is_recording_wav = True
+        output_file = "recording.wav"
+        
+        # Initialize PyAudio
+        audio = pyaudio.PyAudio()
+        stream = audio.open(format=RECORD_FORMAT, channels=RECORD_CHANNELS, rate=RECORD_RATE,
+                          input=True, frames_per_buffer=RECORD_CHUNK)
+        
+        print(f"Recording to {output_file}...")
+        frames = []
+        
+        # Calculate total chunks to record
+        total_chunks = int(RECORD_RATE / RECORD_CHUNK * RECORD_DURATION)
+        
+        # Record in real-time with manual stop option
+        for _ in range(total_chunks):
+            if not self.is_recording_wav:  # Check if recording should stop
+                break
+            data = stream.read(RECORD_CHUNK)
+            frames.append(data)
+        
+        print("Recording complete.")
+        
+        # Stop and close the stream
+        stream.stop_stream()
+        stream.close()
+        audio.terminate()
+        
+        # Save as a .wav file
+        with wave.open(output_file, 'wb') as wf:
+            wf.setnchannels(RECORD_CHANNELS)
+            wf.setsampwidth(audio.get_sample_size(RECORD_FORMAT))
+            wf.setframerate(RECORD_RATE)
+            wf.writeframes(b''.join(frames))
+        
+        print(f"Audio saved to {output_file}")
+        self.is_recording_wav = False
+
     def run(self):
         running = True
         while running:
@@ -226,9 +287,20 @@ class PitchVisualizer:
                 if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN:
-                    button_rect = pygame.Rect(self.button_x, self.button_y, self.button_width, self.button_height)
-                    if button_rect.collidepoint(event.pos):
+                    # Check pitch detection button
+                    pitch_button_rect = pygame.Rect(self.button_x, self.button_y, self.button_width, self.button_height)
+                    if pitch_button_rect.collidepoint(event.pos):
                         self.toggle_recording()
+                    
+                    # Check WAV recording button
+                    wav_button_rect = pygame.Rect(self.wav_button_x, self.wav_button_y, self.wav_button_width, self.wav_button_height)
+                    if wav_button_rect.collidepoint(event.pos):
+                        if self.is_recording_wav:
+                            # Stop recording if already recording
+                            self.is_recording_wav = False
+                        else:
+                            # Start new recording
+                            threading.Thread(target=self.record_to_wav).start()
             
             # Draw background gradient
             self.draw_background()
@@ -250,9 +322,14 @@ class PitchVisualizer:
             # Draw chart
             self.draw_chart()
             
-            # Draw button
-            button_text = "Stop Recording" if self.is_recording else "Start Recording"
-            self.draw_button(button_text)
+            # Draw buttons
+            pitch_button_text = "Stop Recording" if self.is_recording else "Start Recording"
+            self.draw_button(pitch_button_text, self.button_x, self.button_y, self.button_width, self.button_height,
+                           self.button_color, self.button_hover_color)
+            
+            wav_button_text = "Recording..." if self.is_recording_wav else "Record to WAV"
+            self.draw_button(wav_button_text, self.wav_button_x, self.wav_button_y, self.wav_button_width, self.wav_button_height,
+                           self.wav_button_color, self.wav_button_hover_color)
             
             # Update display
             pygame.display.flip()

@@ -5,10 +5,12 @@
 ```
 .
 ├── data/                      # Audio data files
+├── gui/                       # GUI components
 ├── models/                    # Core model implementations
 │   ├── detect_note_from_wav.py
 │   ├── real_time_pitch_detector.py
 │   └── vocoder.py
+├── recordings/                # Recorded audio files
 ├── utils/                     # Utility functions
 │   ├── pitch_data.py
 │   └── pitch_detection.py
@@ -19,5 +21,6 @@
 │   └── __init__.py
 ├── main.py                    # Main application entry point
 ├── requirements.txt           # Project dependencies
+├── .gitignore                # Git ignore rules
 └── README.md                  # Project documentation
 ```
