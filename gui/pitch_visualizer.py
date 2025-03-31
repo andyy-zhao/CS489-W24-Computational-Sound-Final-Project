@@ -59,6 +59,9 @@ class PitchVisualizer:
         self.current_note = "--"
         self.current_freq = "--"
         
+        # Thread synchronization
+        self.stream_lock = threading.Lock()
+        
         # Chart variables
         self.spectrum_data = None
         self.max_freq = 4200  # Extended frequency range
@@ -179,23 +182,42 @@ class PitchVisualizer:
         self.update_thread.start()
     
     def stop_recording(self):
-        self.is_recording = False
-        if self.stream:
-            self.stream.stop_stream()
-            self.stream.close()
-        self.current_note = "--"
-        self.current_freq = "--"
-        self.spectrum_data = None
-        self.detected_freq = None
+        with self.stream_lock:
+            self.is_recording = False
+            if self.stream:
+                try:
+                    self.stream.stop_stream()
+                    self.stream.close()
+                except Exception as e:
+                    print(f"Error stopping stream: {e}")
+                finally:
+                    self.stream = None
+            
+            # Wait for the update thread to finish
+            if self.update_thread and self.update_thread.is_alive():
+                self.update_thread.join(timeout=1.0)
+            
+            # Reset display variables
+            self.current_note = "--"
+            self.current_freq = "--"
+            self.spectrum_data = None
+            self.detected_freq = None
     
     def update_display(self):
         while self.is_recording:
-            note, freq, spectrum = detect_pitch(self.stream)
-            if note and freq and spectrum:
-                self.current_note = note
-                self.current_freq = f"{freq:.1f}"
-                self.detected_freq = freq
-                self.spectrum_data = spectrum
+            with self.stream_lock:
+                if not self.stream:
+                    break
+                try:
+                    note, freq, spectrum = detect_pitch(self.stream)
+                    if note and freq and spectrum:
+                        self.current_note = note
+                        self.current_freq = f"{freq:.1f}"
+                        self.detected_freq = freq
+                        self.spectrum_data = spectrum
+                except Exception as e:
+                    print(f"Error in update_display: {e}")
+                    break
     
     def run(self):
         running = True
