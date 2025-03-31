@@ -505,38 +505,87 @@ class PitchVisualizer:
                 self.is_playing_harmonizer = False
                 return
 
-            # Create pitch shifted versions
-            self.pitch_shifter.shift_pitch("recording.wav", "lower_harmony.wav", -3)
-            self.pitch_shifter.shift_pitch("recording.wav", "upper_harmony.wav", 4)
-            self.pitch_shifter.shift_pitch("recording.wav", "fifth_harmony.wav", 7)
-            self.pitch_shifter.shift_pitch("recording.wav", "octave.wav", 12)
+            # Create pitch shifted versions with slight detuning for richness
+            # Main harmonies
+            self.pitch_shifter.shift_pitch("recording.wav", "lower_harmony.wav", -3.02)
+            self.pitch_shifter.shift_pitch("recording.wav", "upper_harmony.wav", 3.98)
+            self.pitch_shifter.shift_pitch("recording.wav", "fifth_harmony.wav", 7.02)
+            self.pitch_shifter.shift_pitch("recording.wav", "octave.wav", 11.98)
+            
+            # Additional subtle harmonies for richness
+            self.pitch_shifter.shift_pitch("recording.wav", "lower_detune.wav", -3.08)
+            self.pitch_shifter.shift_pitch("recording.wav", "upper_detune.wav", 4.04)
 
             try:
-                # Load all audio files with explicit sample rate
+                # Load all audio files
                 original = AudioSegment.from_wav("recording.wav").set_frame_rate(RECORD_RATE)
                 lower = AudioSegment.from_wav("lower_harmony.wav").set_frame_rate(RECORD_RATE)
                 upper = AudioSegment.from_wav("upper_harmony.wav").set_frame_rate(RECORD_RATE)
                 fifth = AudioSegment.from_wav("fifth_harmony.wav").set_frame_rate(RECORD_RATE)
                 octave = AudioSegment.from_wav("octave.wav").set_frame_rate(RECORD_RATE)
-                
-                print(f"Sample rates - Original: {original.frame_rate}, Lower: {lower.frame_rate}, "
-                      f"Upper: {upper.frame_rate}, Fifth: {fifth.frame_rate}")
-                
-                # Combine the audio tracks with adjusted volumes
-                original = original - 3 # Slightly reduce volume to accommodate fourth harmony
-                lower = lower - 15
-                upper = upper - 9
-                fifth = fifth - 9  # Slightly lower volume for the fifth to not overpower
-                octave = octave - 12
-                
-                # Overlay all tracks
-                combined_audio = original.overlay(lower)
+                lower_detune = AudioSegment.from_wav("lower_detune.wav").set_frame_rate(RECORD_RATE)
+                upper_detune = AudioSegment.from_wav("upper_detune.wav").set_frame_rate(RECORD_RATE)
+
+                # Apply delays for spatial effect and to prevent phase cancellation
+                silence_10ms = AudioSegment.silent(duration=10)
+                silence_15ms = AudioSegment.silent(duration=15)
+                silence_20ms = AudioSegment.silent(duration=20)
+                silence_25ms = AudioSegment.silent(duration=25)
+                silence_30ms = AudioSegment.silent(duration=30)
+
+                # Add delays to create spatial depth
+                lower = silence_10ms + lower
+                upper = silence_15ms + upper
+                fifth = silence_20ms + fifth
+                octave = silence_25ms + octave
+                lower_detune = silence_20ms + lower_detune
+                upper_detune = silence_30ms + upper_detune
+
+                # Pan harmonies for stereo width
+                lower = lower.pan(-0.3)
+                upper = upper.pan(0.3)
+                fifth = fifth.pan(-0.15)
+                octave = octave.pan(0.15)
+                lower_detune = lower_detune.pan(-0.4)
+                upper_detune = upper_detune.pan(0.4)
+
+                # Apply volume adjustments with dynamic control
+                original = original - 4         # Reduce original more (was -2)
+                lower = lower - 9              # Make harmonies louder (was -12)
+                upper = upper - 8              # Make harmonies louder (was -11)
+                fifth = fifth - 10             # Make harmonies louder (was -13)
+                octave = octave - 12           # Make harmonies louder (was -15)
+                lower_detune = lower_detune - 14  # Make detuned versions louder (was -17)
+                upper_detune = upper_detune - 14  # Make detuned versions louder (was -17)
+
+                # Create subtle chorus effect by combining detuned versions
+                lower = lower.overlay(lower_detune)
+                upper = upper.overlay(upper_detune)
+
+                # Combine all tracks
+                combined_audio = original
+                combined_audio = combined_audio.overlay(lower)
                 combined_audio = combined_audio.overlay(upper)
                 combined_audio = combined_audio.overlay(fifth)
                 combined_audio = combined_audio.overlay(octave)
-                # Export combined audio with explicit sample rate
-                combined_audio.export("harmonized.wav", format="wav", parameters=["-ar", str(RECORD_RATE)])
-                
+
+                # Add subtle reverb-like effect using multiple delayed copies
+                reverb_copies = []
+                for i in range(3):
+                    delay_ms = 40 + (i * 20)  # Increasing delays: 40ms, 60ms, 80ms
+                    volume_reduction = 20 + (i * 5)  # Increasing reduction: -20dB, -25dB, -30dB
+                    reverb_copy = combined_audio - volume_reduction
+                    reverb_copy = AudioSegment.silent(duration=delay_ms) + reverb_copy
+                    reverb_copies.append(reverb_copy)
+
+                # Mix in reverb copies
+                for reverb in reverb_copies:
+                    combined_audio = combined_audio.overlay(reverb)
+
+                # Export with high quality
+                combined_audio.export("harmonized.wav", format="wav", 
+                                    parameters=["-ar", str(RECORD_RATE), "-q:a", "0"])
+
                 # Play the combined audio
                 wave_obj = sa.WaveObject.from_wave_file("harmonized.wav")
                 self.harmonizer_play_obj = wave_obj.play()
@@ -559,7 +608,8 @@ class PitchVisualizer:
                 self.harmonizer_play_obj = None
             finally:
                 # Clean up temporary files
-                temp_files = ["lower_harmony.wav", "upper_harmony.wav", "fifth_harmony.wav", "octave.wav"]
+                temp_files = ["lower_harmony.wav", "upper_harmony.wav", "fifth_harmony.wav", 
+                            "octave.wav", "lower_detune.wav", "upper_detune.wav"]
                 for file in temp_files:
                     if os.path.exists(file):
                         try:
