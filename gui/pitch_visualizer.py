@@ -9,6 +9,8 @@ import wave
 from datetime import datetime
 import os
 import subprocess
+from pydub import AudioSegment
+import simpleaudio as sa
 
 # Initialize Pygame
 pygame.init()
@@ -90,7 +92,7 @@ class PitchVisualizer:
         self.shift_button_hover_color = (167, 71, 254)
         
         # Slider properties
-        self.slider_width = 500  # Make slider even wider
+        self.slider_width = 400  # Reduced from 500 to make room for harmonizer button
         self.slider_height = 6
         self.slider_x = WINDOW_WIDTH // 2 - self.slider_width // 2
         self.slider_y = WINDOW_HEIGHT - 70
@@ -100,12 +102,21 @@ class PitchVisualizer:
         self.slider_bg_color = (*DARK_GRAY, 30)
         self.slider_active_color = BLUE
         
+        # Harmonizer button properties
+        self.harmonizer_button_width = 150  # Reduced from 180
+        self.harmonizer_button_height = 35  # Reduced from 45
+        self.harmonizer_button_x = self.slider_x + self.slider_width + 20  # Position to right of slider with 20px gap
+        self.harmonizer_button_y = WINDOW_HEIGHT - 80  # Align vertically with slider
+        self.harmonizer_button_color = (147, 51, 234)  # Different shade of purple
+        self.harmonizer_button_hover_color = (167, 71, 254)
+        
         # Fonts
         self.title_font = pygame.font.Font(None, 48)
         self.note_font = pygame.font.Font(None, 86)  # Increased size for note display
         self.freq_font = pygame.font.Font(None, 36)
         self.label_font = pygame.font.Font(None, 24)
         self.button_font = pygame.font.Font(None, 28)  # Reduced from 32 to 28 for smaller button text
+        self.harmonizer_font = pygame.font.Font(None, 24)  # Even smaller font for harmonizer button
         
         # Initialize variables
         self.is_recording = False
@@ -131,7 +142,7 @@ class PitchVisualizer:
         text_rect = text_surface.get_rect(center=(x, y))
         self.screen.blit(text_surface, text_rect)
         
-    def draw_button(self, text, x, y, width, height, color, hover_color):
+    def draw_button(self, text, x, y, width, height, color, hover_color, custom_font=None):
         mouse_pos = pygame.mouse.get_pos()
         button_rect = pygame.Rect(x, y, width, height)
         
@@ -156,9 +167,12 @@ class PitchVisualizer:
         gradient_surface.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
         self.screen.blit(gradient_surface, button_rect)
         
-        # Draw text with slight shadow using smaller button font
-        self.draw_text(text, self.button_font, (*BLACK, 50), x + width // 2 + 1, y + height // 2 + 1)  # Shadow
-        self.draw_text(text, self.button_font, WHITE, x + width // 2, y + height // 2)  # Text
+        # Use custom font if provided, otherwise use default button font
+        font_to_use = custom_font if custom_font else self.button_font
+        
+        # Draw text with slight shadow
+        self.draw_text(text, font_to_use, (*BLACK, 50), x + width // 2 + 1, y + height // 2 + 1)  # Shadow
+        self.draw_text(text, font_to_use, WHITE, x + width // 2, y + height // 2)  # Text
         
         return button_rect
     
@@ -448,6 +462,66 @@ class PitchVisualizer:
         except Exception as e:
             print(f"Error shifting/playing audio: {e}")
 
+    def create_harmonizer_effect(self):
+        if not os.path.exists("recording.wav"):
+            print("No recording found. Please record audio first.")
+            return
+            
+        try:
+            # Create pitch shifted versions
+            self.pitch_shifter.shift_pitch("recording.wav", "lower_harmony.wav", -3)  # Major third below
+            self.pitch_shifter.shift_pitch("recording.wav", "upper_harmony.wav", 4)   # Major third above
+            self.pitch_shifter.shift_pitch("recording.wav", "fifth_harmony.wav", 7)   # Perfect fifth above
+            self.pitch_shifter.shift_pitch("recording.wav", "octave.wav", 12) 
+
+            try:
+                # Load all audio files with explicit sample rate
+                original = AudioSegment.from_wav("recording.wav").set_frame_rate(RECORD_RATE)
+                lower = AudioSegment.from_wav("lower_harmony.wav").set_frame_rate(RECORD_RATE)
+                upper = AudioSegment.from_wav("upper_harmony.wav").set_frame_rate(RECORD_RATE)
+                fifth = AudioSegment.from_wav("fifth_harmony.wav").set_frame_rate(RECORD_RATE)
+                octave = AudioSegment.from_wav("octave.wav").set_frame_rate(RECORD_RATE)
+                
+                print(f"Sample rates - Original: {original.frame_rate}, Lower: {lower.frame_rate}, "
+                      f"Upper: {upper.frame_rate}, Fifth: {fifth.frame_rate}")
+                
+                # Combine the audio tracks with adjusted volumes
+                original = original - 3 # Slightly reduce volume to accommodate fourth harmony
+                lower = lower - 15
+                upper = upper - 9
+                fifth = fifth - 9  # Slightly lower volume for the fifth to not overpower
+                octave = octave - 12
+                
+                # Overlay all tracks
+                combined_audio = original.overlay(lower)
+                combined_audio = combined_audio.overlay(upper)
+                combined_audio = combined_audio.overlay(fifth)
+                combined_audio = combined_audio.overlay(octave)
+                # Export combined audio with explicit sample rate
+                combined_audio.export("harmonized.wav", format="wav", parameters=["-ar", str(RECORD_RATE)])
+                
+                # Play the combined audio
+                wave_obj = sa.WaveObject.from_wave_file("harmonized.wav")
+                play_obj = wave_obj.play()
+                play_obj.wait_done()
+                
+            except Exception as e:
+                print(f"Error mixing audio: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                # Clean up temporary files
+                temp_files = ["lower_harmony.wav", "upper_harmony.wav", "fifth_harmony.wav"]
+                for file in temp_files:
+                    if os.path.exists(file):
+                        try:
+                            os.remove(file)
+                        except:
+                            pass
+                
+        except Exception as e:
+            print(f"Error creating harmonizer effect: {e}")
+
     def run(self):
         running = True
         while running:
@@ -473,6 +547,12 @@ class PitchVisualizer:
                                                   self.shift_button_width, self.shift_button_height)
                     if shift_button_rect.collidepoint(event.pos):
                         threading.Thread(target=self.shift_and_play_audio).start()
+                    
+                    # Check harmonizer button
+                    harmonizer_button_rect = pygame.Rect(self.harmonizer_button_x, self.harmonizer_button_y,
+                                                       self.harmonizer_button_width, self.harmonizer_button_height)
+                    if harmonizer_button_rect.collidepoint(event.pos):
+                        threading.Thread(target=self.create_harmonizer_effect).start()
                 
                 # Handle slider interactions
                 self.handle_slider_interaction(event)
@@ -519,6 +599,12 @@ class PitchVisualizer:
             self.draw_button("Play Shifted Audio", self.shift_button_x, self.shift_button_y,
                            self.shift_button_width, self.shift_button_height,
                            self.shift_button_color, self.shift_button_hover_color)
+            
+            # Draw harmonizer button with smaller font
+            self.draw_button("Harmonizer Effect", self.harmonizer_button_x, self.harmonizer_button_y,
+                           self.harmonizer_button_width, self.harmonizer_button_height,
+                           self.harmonizer_button_color, self.harmonizer_button_hover_color,
+                           custom_font=self.harmonizer_font)
             
             # Update display
             pygame.display.flip()
