@@ -2,26 +2,22 @@ import librosa
 import numpy as np
 import soundfile as sf
 
-# Interpolate magnitude/phase along frequency (frequency-domain interpolation)
 def interpolate_freq(idxs: np.ndarray, arr: np.ndarray):
     start = idxs.astype(int)
     frac = (idxs - start)[None, :, None]
     shifted_arr = np.concatenate((arr[:, 1:, :], np.zeros((arr.shape[0], 1, arr.shape[2]))), axis=1)
     return arr[:, start, :] * (1 - frac) + shifted_arr[:, start, :] * frac
 
-# Round and interpolate magnitude/phase along frequency (rounding and frequency-domain)
 def round_interpolate_freq(idxs: np.ndarray, arr: np.ndarray):
     return arr[:, (idxs + 0.5).astype(int), :]
 
-# Interpolate magnitude/phase along time (time-domain interpolation)
 def interpolate_time(idxs: np.ndarray, arr: np.ndarray):
-    start = (idxs + 0.5).astype(int)  # Start indices for interpolation
-    frac = (idxs - start)  # Fractional part for interpolation
-    shifted_arr = np.concatenate((arr[:, 1:], np.zeros((arr.shape[0], 1))), axis=1)  # Shift arr by 1 along time axis
-    return arr[:, start] * (1 - frac) + shifted_arr[:, start] * frac  # Interpolation along time axis
+    start = (idxs + 0.5).astype(int)
+    frac = (idxs - start)
+    shifted_arr = np.concatenate((arr[:, 1:], np.zeros((arr.shape[0], 1))), axis=1)
+    return arr[:, start] * (1 - frac) + shifted_arr[:, start] * frac
 
 
-# Round and interpolate magnitude/phase along time (rounding and time-domain)
 def round_interpolate_time(idxs: np.ndarray, arr: np.ndarray):
     return arr[:, (idxs + 0.5).astype(int)]  
 
