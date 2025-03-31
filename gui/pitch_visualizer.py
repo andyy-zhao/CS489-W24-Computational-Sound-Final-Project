@@ -528,13 +528,13 @@ class PitchVisualizer:
                 lower_detune = lower_detune.pan(-0.4)
                 upper_detune = upper_detune.pan(0.4)
 
-                original = original - 4
-                lower = lower - 10
-                upper = upper - 9
-                fifth = fifth - 11
-                octave = octave - 13
-                lower_detune = lower_detune - 15
-                upper_detune = upper_detune - 15
+                original = original - 2
+                lower = lower - 6
+                upper = upper - 5
+                fifth = fifth - 7
+                octave = octave - 8
+                lower_detune = lower_detune - 9
+                upper_detune = upper_detune - 9
 
                 lower = lower.overlay(lower_detune)
                 upper = upper.overlay(upper_detune)
@@ -548,13 +548,15 @@ class PitchVisualizer:
                 reverb_copies = []
                 for i in range(3):
                     delay_ms = 40 + (i * 20)
-                    volume_reduction = 20 + (i * 5)
+                    volume_reduction = 15 + (i * 3)
                     reverb_copy = combined_audio - volume_reduction
                     reverb_copy = AudioSegment.silent(duration=delay_ms) + reverb_copy
                     reverb_copies.append(reverb_copy)
 
                 for reverb in reverb_copies:
                     combined_audio = combined_audio.overlay(reverb)
+
+                combined_audio = combined_audio + 4
 
                 combined_audio.export("harmonized.wav", format="wav", 
                                     parameters=["-ar", str(RECORD_RATE), "-q:a", "0"])
@@ -620,38 +622,66 @@ class PitchVisualizer:
                 print(f"Error generating shifted audio: {e}")
                 return
 
-            self.pitch_shifter.shift_pitch("shifted.wav", "chorus1.wav", 0.15)
+            self.pitch_shifter.shift_pitch("shifted.wav", "chorus1.wav", 0.12)
             self.pitch_shifter.shift_pitch("shifted.wav", "chorus2.wav", -0.15)
             self.pitch_shifter.shift_pitch("shifted.wav", "chorus3.wav", 0.08)
-            self.pitch_shifter.shift_pitch("shifted.wav", "chorus4.wav", -0.08)
-            self.pitch_shifter.shift_pitch("shifted.wav", "chorus5.wav", 0.2)
+            self.pitch_shifter.shift_pitch("shifted.wav", "chorus4.wav", -0.10)
+            self.pitch_shifter.shift_pitch("shifted.wav", "chorus5.wav", 0.18)
+            self.pitch_shifter.shift_pitch("shifted.wav", "chorus6.wav", -0.08)
             
             try:
                 original = AudioSegment.from_wav("shifted.wav").set_frame_rate(RECORD_RATE)
                 chorus1 = AudioSegment.from_wav("chorus1.wav").set_frame_rate(RECORD_RATE)
                 chorus2 = AudioSegment.from_wav("chorus2.wav").set_frame_rate(RECORD_RATE)
                 chorus3 = AudioSegment.from_wav("chorus3.wav").set_frame_rate(RECORD_RATE)
+                chorus4 = AudioSegment.from_wav("chorus4.wav").set_frame_rate(RECORD_RATE)
+                chorus5 = AudioSegment.from_wav("chorus5.wav").set_frame_rate(RECORD_RATE)
+                chorus6 = AudioSegment.from_wav("chorus6.wav").set_frame_rate(RECORD_RATE)
                 
-                delay1 = 20
-                delay2 = 30
-                delay3 = 15
+                delay1 = 25
+                delay2 = 35
+                delay3 = 18
+                delay4 = 28
+                delay5 = 15
+                delay6 = 22
                 
                 silence1 = AudioSegment.silent(duration=delay1)
                 silence2 = AudioSegment.silent(duration=delay2)
                 silence3 = AudioSegment.silent(duration=delay3)
+                silence4 = AudioSegment.silent(duration=delay4)
+                silence5 = AudioSegment.silent(duration=delay5)
+                silence6 = AudioSegment.silent(duration=delay6)
                 
                 chorus1 = silence1 + chorus1
                 chorus2 = silence2 + chorus2
                 chorus3 = silence3 + chorus3
+                chorus4 = silence4 + chorus4
+                chorus5 = silence5 + chorus5
+                chorus6 = silence6 + chorus6
                 
-                original = original - 3 
-                chorus1 = chorus1 - 4
-                chorus2 = chorus2 - 4
-                chorus3 = chorus3 - 6
+                original = original - 2
+                chorus1 = chorus1 - 5
+                chorus2 = chorus2 - 6
+                chorus3 = chorus3 - 4
+                chorus4 = chorus4 - 5
+                chorus5 = chorus5 - 7
+                chorus6 = chorus6 - 6
+                
+                chorus1 = chorus1.pan(-0.2)
+                chorus2 = chorus2.pan(0.25)
+                chorus3 = chorus3.pan(-0.15)
+                chorus4 = chorus4.pan(0.2)
+                chorus5 = chorus5.pan(-0.3)
+                chorus6 = chorus6.pan(0.3)
                 
                 combined_audio = original.overlay(chorus1)
                 combined_audio = combined_audio.overlay(chorus2)
                 combined_audio = combined_audio.overlay(chorus3)
+                combined_audio = combined_audio.overlay(chorus4)
+                combined_audio = combined_audio.overlay(chorus5)
+                combined_audio = combined_audio.overlay(chorus6)
+                
+                combined_audio = combined_audio + 2
                 
                 combined_audio.export("chorus.wav", format="wav", parameters=["-ar", str(RECORD_RATE)])
                 
@@ -674,7 +704,7 @@ class PitchVisualizer:
                 self.is_playing_chorus = False
                 self.chorus_play_obj = None
             finally:
-                temp_files = ["chorus1.wav", "chorus2.wav", "chorus3.wav", "chorus4.wav", "chorus5.wav"]
+                temp_files = ["chorus1.wav", "chorus2.wav", "chorus3.wav", "chorus4.wav", "chorus5.wav", "chorus6.wav"]
                 for file in temp_files:
                     if os.path.exists(file):
                         try:
