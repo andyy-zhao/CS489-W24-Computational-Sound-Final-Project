@@ -794,7 +794,7 @@ class PitchVisualizer:
                            self.chorus_button_color, self.chorus_button_hover_color,
                            custom_font=self.harmonizer_font)
             
-            harmonizer_button_text = "Stop Harmonizer" if self.is_playing_harmonizer else "Harmonizer Effect"
+            harmonizer_button_text = "Stop Harmonizer" if self.is_playing_harmonizer else "Harmonic Effect"
             self.draw_button(harmonizer_button_text, self.harmonizer_button_x, self.harmonizer_button_y,
                            self.harmonizer_button_width, self.harmonizer_button_height,
                            self.harmonizer_button_color, self.harmonizer_button_hover_color,
